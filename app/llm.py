@@ -3,6 +3,8 @@ import re
 import httpx
 from fastapi import HTTPException
 
+PAGE_CITATION = re.compile(r"\[Page\s+([0-9]+)\]", re.IGNORECASE)
+
 async def generate_answer(question: str, contexts: list[dict]):
     if not contexts:
         return "I couldn't find relevant text in this document.", "retrieval-only"
@@ -24,6 +26,12 @@ async def generate_answer(question: str, contexts: list[dict]):
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(url, headers={"x-goog-api-key": key}, json={"contents": [{"parts": [{"text": prompt}]}]})
             response.raise_for_status()
-            return response.json()["candidates"][0]["content"]["parts"][0]["text"], "gemini"
+            answer = response.json()["candidates"][0]["content"]["parts"][0]["text"]
     except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=f"LLM provider failed: {type(exc).__name__}") from exc
+
+    cited_pages = set(PAGE_CITATION.findall(answer))
+    retrieved_pages = {str(context["page"]) for context in contexts}
+    if not cited_pages or not cited_pages.issubset(retrieved_pages):
+        return "I couldn't verify the answer's page citations. See the retrieved excerpts below.", "retrieval-only"
+    return answer, "gemini"
