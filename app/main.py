@@ -1,9 +1,11 @@
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 import fitz
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Header, UploadFile, HTTPException
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from .storage import init_db, save_document, all_chunks, list_documents
 from .retrieval import retrieve
@@ -55,11 +57,26 @@ async def upload(file: UploadFile = File(...)):
     filename = Path(file.filename).name
     return save_document(filename, pages)
 
-@app.post("/api/ask")
-async def ask(data: AskRequest):
+def find_document_hits(data: AskRequest):
     if not any(doc["id"] == data.document_id for doc in list_documents()):
         raise HTTPException(status_code=404, detail="Document not found")
-    hits = retrieve(data.question, all_chunks(data.document_id))
+    return retrieve(data.question, all_chunks(data.document_id))
+
+
+@app.post("/api/ask")
+async def ask(data: AskRequest, accept: str = Header(default="")):
+    hits = await run_in_threadpool(find_document_hits, data)
+    sources = [
+        {"page": chunk["page"], "excerpt": chunk["content"][:500], "score": chunk["score"]}
+        for chunk in hits
+    ]
+    if accept == "application/x-ndjson":
+        async def events():
+            yield json.dumps({"type": "sources", "sources": sources}) + "\n"
+            answer, mode = await generate_answer(data.question, hits)
+            yield json.dumps({"type": "answer", "answer": answer, "mode": mode}) + "\n"
+
+        return StreamingResponse(events(), media_type="application/x-ndjson")
+
     answer, mode = await generate_answer(data.question, hits)
-    return {"answer": answer, "mode": mode, "sources": [
-        {"page": c["page"], "excerpt": c["content"][:500], "score": c["score"]} for c in hits]}
+    return {"answer": answer, "mode": mode, "sources": sources}

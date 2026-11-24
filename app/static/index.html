@@ -198,9 +198,9 @@
       }
     });
 
-    function showResult(result) {
+    function showSources(excerpts) {
       const firstByPage = new Map();
-      result.sources.forEach((source, index) => {
+      excerpts.forEach((source, index) => {
         const item = document.createElement('li');
         item.id = 'excerpt-' + (index + 1);
         item.tabIndex = -1;
@@ -212,6 +212,11 @@
         sourceList.appendChild(item);
         if (!firstByPage.has(String(source.page))) firstByPage.set(String(source.page), item.id);
       });
+      sources.hidden = excerpts.length === 0;
+      return firstByPage;
+    }
+
+    function showResult(result, firstByPage) {
       const text = result.answer;
       answer.replaceChildren();
       let cursor = 0;
@@ -226,9 +231,43 @@
         cursor = match.index + match[0].length;
       }
       answer.append(text.slice(cursor));
-      sources.hidden = result.sources.length === 0;
       mode.textContent = result.mode === 'gemini' ? 'Gemini answer' : 'Retrieval only';
       mode.hidden = false;
+    }
+
+    async function searchDocument(selected, query) {
+      const response = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+        body: JSON.stringify({ document_id: selected, question: query }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Could not search this document.');
+      }
+
+      const stream = response.body.pipeThrough(new TextDecoderStream());
+      let buffer = '';
+      let firstByPage = new Map();
+      let receivedAnswer = false;
+      for await (const chunk of stream) {
+        if (docs.value !== selected) return;
+        const lines = (buffer + chunk).split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line) continue;
+          const result = JSON.parse(line);
+          if (result.type === 'sources') {
+            firstByPage = showSources(result.sources);
+            if (firstByPage.size) status('ask-status', 'Excerpts found. Preparing the answer…');
+          } else if (result.type === 'answer') {
+            showResult(result, firstByPage);
+            receivedAnswer = true;
+          }
+        }
+      }
+      if (!receivedAnswer) throw new Error('The answer was interrupted. You can search again.');
+      if (docs.value === selected) status('ask-status', 'Search complete.');
     }
 
     byId('ask-form').addEventListener('submit', async event => {
@@ -246,15 +285,7 @@
       docs.disabled = true;
       status('ask-status', 'Searching the document…');
       try {
-        const result = await request('/api/ask', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ document_id: selected, question: query }),
-        });
-        if (docs.value === selected) {
-          showResult(result);
-          status('ask-status', 'Search complete.');
-        }
+        await searchDocument(selected, query);
       } catch (error) {
         if (docs.value === selected) status('ask-status', error.message, true);
       } finally {

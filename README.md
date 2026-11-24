@@ -30,7 +30,7 @@ uvicorn app.main:app --reload
 
 Open http://127.0.0.1:8000/ . Add your Gemini API key to `.env` to enable actual LLM responses.
 
-The default model is `gemini-3.5-flash-lite`. If you copied an older `.env` with `GEMINI_MODEL=gemini-2.5-flash`, update that line if your project no longer has access. Restart the app after editing `.env`. If Gemini rejects a request, the app shows the HTTP status and keeps the retrieved excerpts available.
+The default model is `gemini-3.5-flash-lite`. If you copied an older `.env` with `GEMINI_MODEL=gemini-2.5-flash`, update that line if your project no longer has access. Restart the app after editing `.env`. Source excerpts appear while Gemini generates the answer. If Gemini rejects a request or takes more than 12 seconds, the app explains what happened and keeps the excerpts visible.
 
 ## Tests
 ```bash
