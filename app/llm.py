@@ -1,4 +1,3 @@
-import asyncio
 import os
 import re
 from pathlib import Path
@@ -9,7 +8,6 @@ from dotenv import dotenv_values
 PAGE_CITATION = re.compile(r"\[Page\s+([0-9]+)\]", re.IGNORECASE)
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 DEFAULT_MODEL = "gemini-3.5-flash-lite"
-GEMINI_TIMEOUT_SECONDS = 12.0
 
 GEMINI_HTTP_ERRORS = {
     400: "Gemini rejected the request. Check your API key and Google AI Studio project settings.",
@@ -20,16 +18,19 @@ GEMINI_HTTP_ERRORS = {
 }
 
 
-async def generate_answer(question: str, contexts: list[dict]):
+def gemini_key():
+    key = os.getenv("GEMINI_API_KEY", "").strip()
+    # A blank process variable should not hide the saved key.
+    return key or (dotenv_values(ENV_FILE).get("GEMINI_API_KEY") or "").strip()
+
+
+async def generate_answer(question: str, contexts: list[dict], *, model: str | None = None):
     if not contexts:
         return "I couldn't find relevant text in this document.", "retrieval-only"
-    key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not key:
-        # PowerShell can leave a blank override that python-dotenv will not replace.
-        key = (dotenv_values(ENV_FILE).get("GEMINI_API_KEY") or "").strip()
+    key = gemini_key()
     if not key:
         return "No Gemini key was loaded. Set GEMINI_API_KEY in the project’s .env file and restart the app.", "retrieval-only"
-    model = os.getenv("GEMINI_MODEL", "").strip() or DEFAULT_MODEL
+    model = model or os.getenv("GEMINI_MODEL", "").strip() or DEFAULT_MODEL
     if not re.fullmatch(r'[a-zA-Z0-9._-]+', model):
         return "The configured Gemini model name is invalid. Check GEMINI_MODEL in .env.", "retrieval-only"
     evidence = "\n".join(f"[Page {c['page']}] {c['content']}" for c in contexts)
@@ -44,16 +45,14 @@ async def generate_answer(question: str, contexts: list[dict]):
     if model == DEFAULT_MODEL:
         payload["generationConfig"] = {"thinkingConfig": {"thinkingLevel": "minimal"}}
     try:
-        async with asyncio.timeout(GEMINI_TIMEOUT_SECONDS), httpx.AsyncClient(
-            timeout=httpx.Timeout(GEMINI_TIMEOUT_SECONDS, connect=4.0)
-        ) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=4.0)) as client:
             response = await client.post(url, headers={"x-goog-api-key": key}, json=payload)
             response.raise_for_status()
             parts = response.json()["candidates"][0]["content"]["parts"]
             answer = "".join(part.get("text", "") for part in parts if not part.get("thought")).strip()
             if not answer:
                 raise ValueError("Missing response text")
-    except (TimeoutError, httpx.TimeoutException):
+    except httpx.TimeoutException:
         return "Gemini took too long to answer. You can still use the retrieved excerpts below.", "retrieval-only"
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code

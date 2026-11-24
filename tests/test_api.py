@@ -1,4 +1,3 @@
-import asyncio
 import json
 
 import fitz
@@ -51,19 +50,18 @@ def test_upload_rejects_non_pdf(tmp_path, monkeypatch):
         assert r.status_code == 400
 
 
-@pytest.mark.parametrize("slow_response", [False, True])
-def test_ask_stream_keeps_sources_with_gemini(tmp_path, monkeypatch, slow_response):
+@pytest.mark.parametrize("connection_timeout", [False, True])
+def test_ask_stream_keeps_sources_with_gemini(tmp_path, monkeypatch, connection_timeout):
     monkeypatch.setenv("RAG_DB_PATH", str(tmp_path / "rag.db"))
     monkeypatch.setenv("GEMINI_API_KEY", "mock-test-key")
     monkeypatch.setenv("GEMINI_MODEL", llm.DEFAULT_MODEL)
-    monkeypatch.setattr(llm, "GEMINI_TIMEOUT_SECONDS", 0.05)
 
     async def gemini(request):
         payload = json.loads(request.content)
         assert payload["generationConfig"]["thinkingConfig"]["thinkingLevel"] == "minimal"
         assert "[Page 1]" in payload["contents"][0]["parts"][0]["text"]
-        if slow_response:
-            await asyncio.sleep(10)
+        if connection_timeout:
+            raise httpx.ConnectTimeout("Could not establish a connection", request=request)
         return httpx.Response(200, json={"candidates": [{"content": {"parts": [
             {"thought": True, "text": "Internal reasoning [Page 99]"},
             {"text": "There are 14 classes "},
@@ -93,7 +91,7 @@ def test_ask_stream_keeps_sources_with_gemini(tmp_path, monkeypatch, slow_respon
     assert sources["type"] == "sources"
     assert sources["sources"][0]["page"] == 1
     assert answer["type"] == "answer"
-    if slow_response:
+    if connection_timeout:
         assert answer["mode"] == "retrieval-only"
         assert "took too long" in answer["answer"]
     else:
