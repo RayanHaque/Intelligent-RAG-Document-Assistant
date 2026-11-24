@@ -1,11 +1,13 @@
 import fitz
 import httpx
 from fastapi.testclient import TestClient
+from app import llm
 from app.main import app
 
 def test_pdf_upload_and_question(tmp_path, monkeypatch):
     monkeypatch.setenv("RAG_DB_PATH", str(tmp_path / "rag.db"))
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(llm, "ENV_FILE", tmp_path / ".env")
     pdf = fitz.open()
     page = pdf.new_page()
     page.insert_text((50, 50), "FastAPI makes it easy to build Python web APIs.")
