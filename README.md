@@ -5,10 +5,10 @@ Independently authored, university-level FastAPI project for PDF question answer
 ## Working features
 - Upload a **text-based PDF** up to 10 MB and 100 pages (`POST /api/documents`).
 - Extract PDF text page-by-page using PyMuPDF; split into overlapping chunks stored in SQLite.
-- Retrieve relevant chunks using **TF-IDF cosine similarity** (a simple baseline, not FAISS/neural embeddings).
-- When `GEMINI_API_KEY` is present, generate a grounded response with the Gemini API and ask it to cite pages.
-- Without an API key, show retrieval-only results rather than pretending an LLM generated an answer.
-- Minimal browser interface, `/docs` interactive API, and automated tests.
+- Rank excerpts with **TF-IDF cosine similarity** over words and two-word phrases, normalize accents, and skip duplicate or zero-score excerpts.
+- When `GEMINI_API_KEY` is present and evidence is available, generate a response with Gemini. Answers with missing or unsupported page references fall back to the retrieved excerpts.
+- Without an API key, show retrieved excerpts in retrieval-only mode.
+- Use the responsive document library and question form to upload PDFs and jump from inline citations to source excerpts. The interactive API is available at `/docs`.
 
 ## Setup (Windows PowerShell)
 ```powershell
@@ -47,7 +47,7 @@ PDF → PyMuPDF page extraction → overlapping chunks → SQLite → TF-IDF sea
 ## Honest limitations
 - **OCR not implemented**: scanned documents without extractable text are rejected.
 - **FAISS, neural embeddings, and visual citation highlights not implemented yet**. Implement them in your next iterations, and compare against TF-IDF.
-- Page references are grounded in retrieved chunk metadata; LLM page citations should still be verified.
+- Citation checks verify the page number against the retrieved excerpts. Use the linked excerpt to check the claim itself.
 - No user accounts, rate limiting, multi-tenant isolation or persistence of original PDFs. This is not a production service.
 - Treat uploaded documents as untrusted; avoid uploading private files to third-party models.
 
